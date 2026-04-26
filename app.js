@@ -769,6 +769,20 @@
     });
   }
 
+  // ── Midnight Auto-Refresh ──────────────────────────
+  function scheduleMidnightRefresh() {
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 5, 0); // 00:00:05 next day (5s buffer)
+    const msUntilMidnight = midnight - now;
+    setTimeout(() => {
+      checkAutoArchive();
+      render();
+      showToast('Yeni gün başladı — tarihler güncellendi ✨');
+      scheduleMidnightRefresh(); // Schedule next one
+    }, msUntilMidnight);
+  }
+
   // ── Initialize ─────────────────────────────────────
   function init() {
     initTheme();
@@ -779,6 +793,7 @@
     checkAutoArchive();
     bindEvents();
     render();
+    scheduleMidnightRefresh();
   }
 
   // Boot
