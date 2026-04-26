@@ -599,6 +599,7 @@
 
   // ── Drag & Drop ────────────────────────────────────
   function setupDragAndDrop() {
+    // Only bind dragstart/dragend to new rows (per render)
     const rows = tableBody.querySelectorAll('.task-row[draggable]');
     rows.forEach(row => {
       row.addEventListener('dragstart', (e) => {
@@ -606,40 +607,54 @@
         dragSrcCatId = row.dataset.catId;
         row.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', '');
+        e.dataTransfer.setData('text/plain', row.dataset.taskId);
       });
-
       row.addEventListener('dragend', () => {
         row.classList.remove('dragging');
         tableBody.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+        dragSrcTaskId = null;
+        dragSrcCatId = null;
       });
+    });
+  }
 
-      row.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        if (!row.dataset.taskId || row.dataset.catId !== dragSrcCatId) return;
-        e.dataTransfer.dropEffect = 'move';
-        row.classList.add('drag-over');
-      });
+  // Called once from bindEvents — event delegation for drop targets  
+  function initDragDelegation() {
+    tableBody.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const targetRow = e.target.closest('.task-row[draggable]');
+      if (!targetRow) return;
+      if (!targetRow.dataset.taskId || targetRow.dataset.catId !== dragSrcCatId) return;
+      if (targetRow.dataset.taskId === dragSrcTaskId) return;
+      tableBody.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+      targetRow.classList.add('drag-over');
+    });
 
-      row.addEventListener('dragleave', () => {
-        row.classList.remove('drag-over');
-      });
+    tableBody.addEventListener('dragleave', (e) => {
+      const targetRow = e.target.closest('.task-row[draggable]');
+      if (targetRow) targetRow.classList.remove('drag-over');
+    });
 
-      row.addEventListener('drop', (e) => {
-        e.preventDefault();
-        row.classList.remove('drag-over');
-        if (!dragSrcTaskId || !row.dataset.taskId) return;
-        if (dragSrcCatId !== row.dataset.catId) return;
-        const cat = state.categories.find(c => c.id === dragSrcCatId);
-        if (!cat) return;
-        const fromIdx = cat.tasks.findIndex(t => t.id === dragSrcTaskId);
-        const toIdx = cat.tasks.findIndex(t => t.id === row.dataset.taskId);
-        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
-        const [moved] = cat.tasks.splice(fromIdx, 1);
-        cat.tasks.splice(toIdx, 0, moved);
-        saveState();
-        render();
-      });
+    tableBody.addEventListener('drop', (e) => {
+      e.preventDefault();
+      tableBody.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+      if (!dragSrcTaskId || !dragSrcCatId) return;
+      const targetRow = e.target.closest('.task-row[draggable]');
+      if (!targetRow || !targetRow.dataset.taskId) return;
+      if (targetRow.dataset.catId !== dragSrcCatId) return;
+      if (targetRow.dataset.taskId === dragSrcTaskId) return;
+      const cat = state.categories.find(c => c.id === dragSrcCatId);
+      if (!cat) return;
+      const fromIdx = cat.tasks.findIndex(t => t.id === dragSrcTaskId);
+      const toIdx = cat.tasks.findIndex(t => t.id === targetRow.dataset.taskId);
+      if (fromIdx === -1 || toIdx === -1) return;
+      const [moved] = cat.tasks.splice(fromIdx, 1);
+      cat.tasks.splice(toIdx, 0, moved);
+      dragSrcTaskId = null;
+      dragSrcCatId = null;
+      saveState();
+      render();
     });
   }
 
@@ -697,6 +712,9 @@
   // ── Event Bindings ─────────────────────────────────
   function bindEvents() {
     $('#btn-theme-toggle').addEventListener('click', toggleTheme);
+
+    // Init drag delegation once
+    initDragDelegation();
 
     $('#history-toggle').addEventListener('click', () => {
       $('#history-toggle').classList.toggle('open');
