@@ -1,11 +1,10 @@
 /* ============================================
-   TaskGrid — Application Logic
+   TaskGrid — Application Logic v2
    ============================================ */
 
 (() => {
   'use strict';
 
-  // ── Constants ──────────────────────────────────────
   const STORAGE_KEY = 'taskgrid_data';
   const THEME_KEY = 'taskgrid_theme';
   const NUM_DAYS = 7;
@@ -18,7 +17,6 @@
 
   const DAY_NAMES_SHORT = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
 
-  // ── DOM References ─────────────────────────────────
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -27,29 +25,31 @@
   const tableFoot = $('#table-foot');
   const weekPercentEl = $('#week-percent');
   const weekBarFill = $('#week-bar-fill');
-
-  // Category modal
   const categoryOverlay = $('#modal-overlay');
   const categoryNameInput = $('#input-category-name');
   const colorPickerEl = $('#color-picker');
-
-  // Task modal
   const taskOverlay = $('#modal-task-overlay');
   const taskNameInput = $('#input-task-name');
 
   // ── State ──────────────────────────────────────────
   let state = {
     categories: [],
-    // completions: { "taskId:YYYY-MM-DD": true }
     completions: {},
-    // weekHistory: [{ id, startDate, endDate, percent, done, total, archivedAt }]
     weekHistory: [],
-    // currentWeekStart: "YYYY-MM-DD" — Monday of the active week
     currentWeekStart: null,
   };
 
   let selectedColor = CATEGORY_COLORS[0];
   let addingTaskToCategoryId = null;
+
+  // Edit mode tracking
+  let editingCategoryId = null;
+  let editingTaskId = null;
+  let editingTaskCatId = null;
+
+  // Drag state
+  let dragSrcTaskId = null;
+  let dragSrcCatId = null;
 
   // ── Date Helpers ───────────────────────────────────
   function getWeekDates() {
@@ -68,7 +68,7 @@
     const date = new Date(d);
     date.setHours(0, 0, 0, 0);
     const day = date.getDay();
-    const diff = date.getDate() - day + (day === 0 ? -6 : 1); // Monday
+    const diff = date.getDate() - day + (day === 0 ? -6 : 1);
     date.setDate(diff);
     return date;
   }
@@ -81,7 +81,7 @@
   }
 
   function formatDateKey(date) {
-    return date.toISOString().split('T')[0]; // YYYY-MM-DD
+    return date.toISOString().split('T')[0];
   }
 
   function formatDayName(date) {
@@ -100,23 +100,17 @@
   }
 
   function isTaskScheduledForDate(task, date) {
-    // If no days specified (empty array or undefined), task is active every day
     if (!task.days || task.days.length === 0) return true;
     return task.days.includes(date.getDay());
   }
 
-  // ── ID Generator ───────────────────────────────────
   function uid() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
 
   // ── Persistence ────────────────────────────────────
   function saveState() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
-      console.warn('Failed to save state:', e);
-    }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
   }
 
   function loadState() {
@@ -124,24 +118,15 @@
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && Array.isArray(parsed.categories)) {
-          state = parsed;
-        }
+        if (parsed && Array.isArray(parsed.categories)) state = parsed;
       }
-    } catch (e) {
-      console.warn('Failed to load state:', e);
-    }
+    } catch (e) {}
   }
 
   // ── Theme ──────────────────────────────────────────
   function initTheme() {
     const saved = localStorage.getItem(THEME_KEY);
-    if (saved) {
-      document.documentElement.setAttribute('data-theme', saved);
-    } else {
-      // Default to dark
-      document.documentElement.setAttribute('data-theme', 'dark');
-    }
+    document.documentElement.setAttribute('data-theme', saved || 'dark');
   }
 
   function toggleTheme() {
@@ -178,6 +163,13 @@
     });
   }
 
+  function selectColorInPicker(color) {
+    selectedColor = color;
+    $$('.color-swatch').forEach(s => {
+      s.classList.toggle('selected', s.dataset.color === color);
+    });
+  }
+
   // ── Modal Helpers ──────────────────────────────────
   function openModal(overlay) {
     overlay.classList.add('active');
@@ -189,31 +181,45 @@
 
   function closeModal(overlay) {
     overlay.classList.remove('active');
+    // Reset edit mode
+    if (overlay === categoryOverlay) {
+      editingCategoryId = null;
+      $('#cat-modal-title').textContent = 'Yeni Kategori';
+      $('#btn-confirm-category').textContent = 'Oluştur';
+    }
+    if (overlay === taskOverlay) {
+      editingTaskId = null;
+      editingTaskCatId = null;
+      $('#task-modal-title').textContent = 'Yeni Görev';
+      $('#btn-confirm-task').textContent = 'Görev Ekle';
+    }
   }
 
   // ── Category CRUD ──────────────────────────────────
   function addCategory(name, color) {
-    const cat = {
-      id: uid(),
-      name: name.trim(),
-      color: color,
-      tasks: [],
-    };
+    const cat = { id: uid(), name: name.trim(), color, tasks: [] };
     state.categories.push(cat);
     saveState();
     render();
     showToast(`"${cat.name}" kategorisi oluşturuldu`);
   }
 
+  function updateCategory(catId, name, color) {
+    const cat = state.categories.find(c => c.id === catId);
+    if (!cat) return;
+    cat.name = name.trim();
+    cat.color = color;
+    saveState();
+    render();
+    showToast(`"${cat.name}" güncellendi`);
+  }
+
   function deleteCategory(catId) {
     const cat = state.categories.find(c => c.id === catId);
     if (!cat) return;
-    // Clean up completions for tasks in this category
     cat.tasks.forEach(task => {
       Object.keys(state.completions).forEach(key => {
-        if (key.startsWith(task.id + ':')) {
-          delete state.completions[key];
-        }
+        if (key.startsWith(task.id + ':')) delete state.completions[key];
       });
     });
     state.categories = state.categories.filter(c => c.id !== catId);
@@ -226,15 +232,23 @@
   function addTask(catId, name, days) {
     const cat = state.categories.find(c => c.id === catId);
     if (!cat) return;
-    const task = {
-      id: uid(),
-      name: name.trim(),
-      days: days || [], // array of day numbers (0=Paz, 1=Pzt, etc.), empty = her gün
-    };
+    const task = { id: uid(), name: name.trim(), days: days || [] };
     cat.tasks.push(task);
     saveState();
     render();
     showToast(`"${task.name}" görevi eklendi`);
+  }
+
+  function updateTask(catId, taskId, name, days) {
+    const cat = state.categories.find(c => c.id === catId);
+    if (!cat) return;
+    const task = cat.tasks.find(t => t.id === taskId);
+    if (!task) return;
+    task.name = name.trim();
+    task.days = days || [];
+    saveState();
+    render();
+    showToast(`"${task.name}" güncellendi`);
   }
 
   function deleteTask(catId, taskId) {
@@ -242,11 +256,8 @@
     if (!cat) return;
     const task = cat.tasks.find(t => t.id === taskId);
     if (!task) return;
-    // Clean up completions
     Object.keys(state.completions).forEach(key => {
-      if (key.startsWith(taskId + ':')) {
-        delete state.completions[key];
-      }
+      if (key.startsWith(taskId + ':')) delete state.completions[key];
     });
     cat.tasks = cat.tasks.filter(t => t.id !== taskId);
     saveState();
@@ -254,14 +265,24 @@
     showToast(`"${task.name}" görevi kaldırıldı`);
   }
 
+  function moveTask(catId, taskId, direction) {
+    const cat = state.categories.find(c => c.id === catId);
+    if (!cat) return;
+    const idx = cat.tasks.findIndex(t => t.id === taskId);
+    if (idx === -1) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= cat.tasks.length) return;
+    // Swap
+    [cat.tasks[idx], cat.tasks[newIdx]] = [cat.tasks[newIdx], cat.tasks[idx]];
+    saveState();
+    render();
+  }
+
   // ── Toggle Completion ──────────────────────────────
   function toggleCompletion(taskId, dateKey) {
     const key = taskId + ':' + dateKey;
-    if (state.completions[key]) {
-      delete state.completions[key];
-    } else {
-      state.completions[key] = true;
-    }
+    if (state.completions[key]) delete state.completions[key];
+    else state.completions[key] = true;
     saveState();
     render();
   }
@@ -269,34 +290,24 @@
   // ── Statistics ─────────────────────────────────────
   function getAllTasks() {
     const tasks = [];
-    state.categories.forEach(cat => {
-      cat.tasks.forEach(t => tasks.push(t));
-    });
+    state.categories.forEach(cat => cat.tasks.forEach(t => tasks.push(t)));
     return tasks;
   }
 
   function getDayStats(dateKey, date) {
     const tasks = getAllTasks();
     if (tasks.length === 0) return { done: 0, total: 0, percent: 0 };
-    // Only count tasks scheduled for this day
     const scheduled = tasks.filter(t => isTaskScheduledForDate(t, date));
     if (scheduled.length === 0) return { done: 0, total: 0, percent: 0 };
     let done = 0;
-    scheduled.forEach(t => {
-      if (state.completions[t.id + ':' + dateKey]) done++;
-    });
-    return {
-      done,
-      total: scheduled.length,
-      percent: Math.round((done / scheduled.length) * 100),
-    };
+    scheduled.forEach(t => { if (state.completions[t.id + ':' + dateKey]) done++; });
+    return { done, total: scheduled.length, percent: Math.round((done / scheduled.length) * 100) };
   }
 
   function getWeekStats(dates) {
     const tasks = getAllTasks();
     if (tasks.length === 0) return 0;
-    let totalChecks = 0;
-    let maxChecks = 0;
+    let totalChecks = 0, maxChecks = 0;
     dates.forEach(d => {
       const dk = formatDateKey(d);
       tasks.forEach(t => {
@@ -313,8 +324,7 @@
   function computeWeekStatsForDates(startDateStr, numDays) {
     const tasks = getAllTasks();
     if (tasks.length === 0) return { done: 0, total: 0, percent: 0 };
-    let done = 0;
-    let total = 0;
+    let done = 0, total = 0;
     for (let i = 0; i < numDays; i++) {
       const d = new Date(startDateStr);
       d.setDate(d.getDate() + i);
@@ -326,94 +336,64 @@
         }
       });
     }
-    return {
-      done,
-      total,
-      percent: total > 0 ? Math.round((done / total) * 100) : 0,
-    };
+    return { done, total, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
   }
 
   function archiveCurrentWeek() {
     if (!state.currentWeekStart) return;
     const stats = computeWeekStatsForDates(state.currentWeekStart, 7);
-    // Only archive if there were any scheduled tasks
     if (stats.total === 0) return;
     const startDate = state.currentWeekStart;
-    const endD = new Date(startDate);
-    endD.setDate(endD.getDate() + 6);
+    const endD = new Date(startDate); endD.setDate(endD.getDate() + 6);
     const endDate = formatDateKey(endD);
-    // Avoid duplicate archives for the same week
-    const exists = state.weekHistory.some(w => w.startDate === startDate);
-    if (exists) return;
-    state.weekHistory.push({
-      id: uid(),
-      startDate,
-      endDate,
-      percent: stats.percent,
-      done: stats.done,
-      total: stats.total,
-      archivedAt: new Date().toISOString(),
-    });
+    if (state.weekHistory.some(w => w.startDate === startDate)) return;
+    state.weekHistory.push({ id: uid(), startDate, endDate, percent: stats.percent, done: stats.done, total: stats.total, archivedAt: new Date().toISOString() });
   }
 
   function checkAutoArchive() {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const today = new Date(); today.setHours(0,0,0,0);
     const thisMonday = getMonday(today);
     const thisMondayStr = formatDateKey(thisMonday);
-
-    if (!state.currentWeekStart) {
-      // First time — set to this Monday
-      state.currentWeekStart = thisMondayStr;
-      saveState();
-      return;
-    }
-
-    // If current week start is before this Monday, archive past weeks
+    if (!state.currentWeekStart) { state.currentWeekStart = thisMondayStr; saveState(); return; }
     const savedMonday = new Date(state.currentWeekStart);
     if (savedMonday < thisMonday) {
-      // Archive the old week
       archiveCurrentWeek();
-      // Also archive any skipped weeks in between (if the user was away)
-      const nextWeek = new Date(savedMonday);
-      nextWeek.setDate(nextWeek.getDate() + 7);
+      const nextWeek = new Date(savedMonday); nextWeek.setDate(nextWeek.getDate() + 7);
       while (nextWeek < thisMonday) {
         const weekStart = formatDateKey(nextWeek);
         const stats = computeWeekStatsForDates(weekStart, 7);
-        if (stats.total > 0) {
-          const endD = new Date(nextWeek);
-          endD.setDate(endD.getDate() + 6);
-          const exists = state.weekHistory.some(w => w.startDate === weekStart);
-          if (!exists) {
-            state.weekHistory.push({
-              id: uid(),
-              startDate: weekStart,
-              endDate: formatDateKey(endD),
-              percent: stats.percent,
-              done: stats.done,
-              total: stats.total,
-              archivedAt: new Date().toISOString(),
-            });
-          }
+        if (stats.total > 0 && !state.weekHistory.some(w => w.startDate === weekStart)) {
+          const endD = new Date(nextWeek); endD.setDate(endD.getDate() + 6);
+          state.weekHistory.push({ id: uid(), startDate: weekStart, endDate: formatDateKey(endD), percent: stats.percent, done: stats.done, total: stats.total, archivedAt: new Date().toISOString() });
         }
         nextWeek.setDate(nextWeek.getDate() + 7);
       }
-      // Update to this Monday
-      state.currentWeekStart = thisMondayStr;
-      saveState();
+      state.currentWeekStart = thisMondayStr; saveState();
     }
   }
 
   function deleteHistoryEntry(id) {
     state.weekHistory = state.weekHistory.filter(w => w.id !== id);
-    saveState();
-    renderHistory();
+    saveState(); renderHistory();
+  }
+
+  // ── Helpers ────────────────────────────────────────
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1,3), 16);
+    const g = parseInt(hex.slice(3,5), 16);
+    const b = parseInt(hex.slice(5,7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
   }
 
   // ── Render ─────────────────────────────────────────
   function render() {
     const dates = getWeekDates();
-
     renderHead(dates);
     renderBody(dates);
     renderFoot(dates);
@@ -422,8 +402,7 @@
   }
 
   function renderHead(dates) {
-    let html = '<tr>';
-    html += '<th>Görev</th>';
+    let html = '<tr><th>Görev</th>';
     dates.forEach(d => {
       const todayClass = isToday(d) ? ' today' : '';
       html += `<th class="${todayClass}">
@@ -437,34 +416,37 @@
 
   function renderBody(dates) {
     if (state.categories.length === 0) {
-      tableBody.innerHTML = `
-        <tr>
-          <td colspan="${dates.length + 1}">
-            <div class="empty-state">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                <line x1="3" y1="9" x2="21" y2="9"/>
-                <line x1="9" y1="3" x2="9" y2="21"/>
-              </svg>
-              <h3>Henüz kategori yok</h3>
-              <p>Görevlerinizi takip etmeye başlamak için "Kategori Ekle" butonuna tıklayın.</p>
-            </div>
-          </td>
-        </tr>`;
+      tableBody.innerHTML = `<tr><td colspan="${dates.length + 1}">
+        <div class="empty-state">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+          <h3>Henüz kategori yok</h3>
+          <p>Görevlerinizi takip etmeye başlamak için "Kategori Ekle" butonuna tıklayın.</p>
+        </div></td></tr>`;
       return;
     }
 
     let html = '';
 
-    state.categories.forEach(cat => {
+    state.categories.forEach((cat, catIdx) => {
+      const colorBg = hexToRgba(cat.color, 0.08);
+      const colorBorder = hexToRgba(cat.color, 0.3);
+
+      // Spacer row between categories
+      if (catIdx > 0) {
+        html += `<tr class="cat-spacer"><td colspan="${dates.length + 1}"></td></tr>`;
+      }
+
       // Category header row
-      html += `<tr class="category-row fade-in-up">`;
-      html += `<td colspan="${dates.length + 1}">
+      html += `<tr class="category-row fade-in-up" style="--cat-color:${cat.color}; --cat-bg:${colorBg}; --cat-border:${colorBorder}">`;
+      html += `<td colspan="${dates.length + 1}" style="background:${colorBg}; border-left:4px solid ${cat.color}">
         <div class="category-header">
           <div class="category-color-dot" style="background:${cat.color}"></div>
-          <span class="category-name">${escapeHtml(cat.name)}</span>
+          <span class="category-name cat-edit-btn" data-cat-id="${cat.id}" title="Düzenlemek için tıkla">${escapeHtml(cat.name)}</span>
           <div class="category-actions">
-            <button class="cat-btn add" data-cat-id="${cat.id}" title="Görev ekle">
+            <button class="cat-btn edit" data-cat-id="${cat.id}" title="Düzenle" style="color:${cat.color}">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="cat-btn add" data-cat-id="${cat.id}" title="Görev ekle" style="color:${cat.color}">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
             <button class="cat-btn delete" data-cat-id="${cat.id}" title="Kategoriyi sil">
@@ -477,27 +459,34 @@
 
       // Task rows
       if (cat.tasks.length === 0) {
-        html += `<tr class="task-row fade-in-up">
-          <td colspan="${dates.length + 1}">
+        html += `<tr class="task-row fade-in-up" style="--cat-color:${cat.color}">
+          <td colspan="${dates.length + 1}" style="border-left:4px solid ${hexToRgba(cat.color, 0.15)}">
             <span style="font-size:0.8rem; color:var(--text-tertiary); padding-left: 1rem;">Görev yok — eklemek için + butonuna tıklayın</span>
-          </td>
-        </tr>`;
+          </td></tr>`;
       } else {
-        cat.tasks.forEach(task => {
-          // Build day badges if task has specific days
+        cat.tasks.forEach((task, taskIdx) => {
           let dayBadges = '';
           if (task.days && task.days.length > 0) {
             dayBadges = '<span class="task-days">' + task.days.map(d => `<span class="task-day-badge">${DAY_NAMES_SHORT[d]}</span>`).join('') + '</span>';
           }
-          html += `<tr class="task-row fade-in-up">`;
-          html += `<td>
+          html += `<tr class="task-row fade-in-up" data-task-id="${task.id}" data-cat-id="${cat.id}" draggable="true">`;
+          html += `<td style="border-left:4px solid ${hexToRgba(cat.color, 0.15)}">
             <div class="task-label">
+              <span class="drag-handle" title="Sıralamak için sürükle">⠿</span>
               <div class="task-color-bar" style="background:${cat.color}"></div>
-              <span class="task-name">${escapeHtml(task.name)}</span>
+              <span class="task-name task-edit-btn" data-cat-id="${cat.id}" data-task-id="${task.id}" title="Düzenlemek için tıkla">${escapeHtml(task.name)}</span>
               ${dayBadges}
-              <button class="task-delete-btn" data-cat-id="${cat.id}" data-task-id="${task.id}" title="Görevi sil">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
+              <div class="task-row-actions">
+                <button class="task-move-btn" data-cat-id="${cat.id}" data-task-id="${task.id}" data-dir="-1" title="Yukarı taşı" ${taskIdx === 0 ? 'disabled' : ''}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="18 15 12 9 6 15"/></svg>
+                </button>
+                <button class="task-move-btn" data-cat-id="${cat.id}" data-task-id="${task.id}" data-dir="1" title="Aşağı taşı" ${taskIdx === cat.tasks.length - 1 ? 'disabled' : ''}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <button class="task-delete-btn" data-cat-id="${cat.id}" data-task-id="${task.id}" title="Görevi sil">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
             </div>
           </td>`;
           dates.forEach(d => {
@@ -505,13 +494,9 @@
             const todayClass = isToday(d) ? ' today-col' : '';
             if (isTaskScheduledForDate(task, d)) {
               const checked = state.completions[task.id + ':' + dk] ? ' checked' : '';
-              html += `<td class="${todayClass}">
-                <div class="cell-check${checked}" data-task-id="${task.id}" data-date="${dk}"></div>
-              </td>`;
+              html += `<td class="${todayClass}" style="border-left:none"><div class="cell-check${checked}" data-task-id="${task.id}" data-date="${dk}" style="--check-active:${cat.color}"></div></td>`;
             } else {
-              html += `<td class="${todayClass}">
-                <div class="cell-inactive"></div>
-              </td>`;
+              html += `<td class="${todayClass}"><div class="cell-inactive"></div></td>`;
             }
           });
           html += `</tr>`;
@@ -521,23 +506,40 @@
 
     tableBody.innerHTML = html;
 
-    // Attach event listeners
+    // ── Attach Events ──
     tableBody.querySelectorAll('.cell-check').forEach(el => {
-      el.addEventListener('click', () => {
-        toggleCompletion(el.dataset.taskId, el.dataset.date);
-      });
+      el.addEventListener('click', () => toggleCompletion(el.dataset.taskId, el.dataset.date));
     });
 
+    // Category add task
     tableBody.querySelectorAll('.cat-btn.add').forEach(el => {
       el.addEventListener('click', () => {
+        editingTaskId = null; editingTaskCatId = null;
         addingTaskToCategoryId = el.dataset.catId;
         taskNameInput.value = '';
-        // Reset day picker
+        $('#task-modal-title').textContent = 'Yeni Görev';
+        $('#btn-confirm-task').textContent = 'Görev Ekle';
         $$('#day-picker .day-chip').forEach(c => c.classList.remove('selected'));
         openModal(taskOverlay);
       });
     });
 
+    // Category edit
+    tableBody.querySelectorAll('.cat-btn.edit, .cat-edit-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        const catId = el.dataset.catId;
+        const cat = state.categories.find(c => c.id === catId);
+        if (!cat) return;
+        editingCategoryId = catId;
+        categoryNameInput.value = cat.name;
+        selectColorInPicker(cat.color);
+        $('#cat-modal-title').textContent = 'Kategori Düzenle';
+        $('#btn-confirm-category').textContent = 'Kaydet';
+        openModal(categoryOverlay);
+      });
+    });
+
+    // Category delete
     tableBody.querySelectorAll('.cat-btn.delete').forEach(el => {
       el.addEventListener('click', () => {
         const catId = el.dataset.catId;
@@ -548,46 +550,115 @@
       });
     });
 
-    tableBody.querySelectorAll('.task-delete-btn').forEach(el => {
+    // Task edit (click on name)
+    tableBody.querySelectorAll('.task-edit-btn').forEach(el => {
       el.addEventListener('click', () => {
-        const taskId = el.dataset.taskId;
         const catId = el.dataset.catId;
-        deleteTask(catId, taskId);
+        const taskId = el.dataset.taskId;
+        const cat = state.categories.find(c => c.id === catId);
+        if (!cat) return;
+        const task = cat.tasks.find(t => t.id === taskId);
+        if (!task) return;
+        editingTaskId = taskId;
+        editingTaskCatId = catId;
+        addingTaskToCategoryId = null;
+        taskNameInput.value = task.name;
+        $('#task-modal-title').textContent = 'Görev Düzenle';
+        $('#btn-confirm-task').textContent = 'Kaydet';
+        // Set day picker
+        $$('#day-picker .day-chip').forEach(c => c.classList.remove('selected'));
+        if (task.days && task.days.length > 0) {
+          task.days.forEach(d => {
+            const chip = $(`#day-picker .day-chip[data-day="${d}"]`);
+            if (chip) chip.classList.add('selected');
+          });
+          // Sync "Tümü"
+          const dayChips = $$('#day-picker .day-chip:not(.day-chip-all)');
+          const allSelected = [...dayChips].every(c => c.classList.contains('selected'));
+          $('#day-picker .day-chip-all').classList.toggle('selected', allSelected);
+        }
+        openModal(taskOverlay);
+      });
+    });
+
+    // Task delete
+    tableBody.querySelectorAll('.task-delete-btn').forEach(el => {
+      el.addEventListener('click', () => deleteTask(el.dataset.catId, el.dataset.taskId));
+    });
+
+    // Task move buttons
+    tableBody.querySelectorAll('.task-move-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        moveTask(el.dataset.catId, el.dataset.taskId, parseInt(el.dataset.dir));
+      });
+    });
+
+    // Drag & drop for reordering
+    setupDragAndDrop();
+  }
+
+  // ── Drag & Drop ────────────────────────────────────
+  function setupDragAndDrop() {
+    const rows = tableBody.querySelectorAll('.task-row[draggable]');
+    rows.forEach(row => {
+      row.addEventListener('dragstart', (e) => {
+        dragSrcTaskId = row.dataset.taskId;
+        dragSrcCatId = row.dataset.catId;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+      });
+
+      row.addEventListener('dragend', () => {
+        row.classList.remove('dragging');
+        tableBody.querySelectorAll('.drag-over').forEach(r => r.classList.remove('drag-over'));
+      });
+
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (!row.dataset.taskId || row.dataset.catId !== dragSrcCatId) return;
+        e.dataTransfer.dropEffect = 'move';
+        row.classList.add('drag-over');
+      });
+
+      row.addEventListener('dragleave', () => {
+        row.classList.remove('drag-over');
+      });
+
+      row.addEventListener('drop', (e) => {
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        if (!dragSrcTaskId || !row.dataset.taskId) return;
+        if (dragSrcCatId !== row.dataset.catId) return;
+        const cat = state.categories.find(c => c.id === dragSrcCatId);
+        if (!cat) return;
+        const fromIdx = cat.tasks.findIndex(t => t.id === dragSrcTaskId);
+        const toIdx = cat.tasks.findIndex(t => t.id === row.dataset.taskId);
+        if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
+        const [moved] = cat.tasks.splice(fromIdx, 1);
+        cat.tasks.splice(toIdx, 0, moved);
+        saveState();
+        render();
       });
     });
   }
 
   function renderFoot(dates) {
     const tasks = getAllTasks();
-    if (tasks.length === 0) {
-      tableFoot.innerHTML = '';
-      return;
-    }
+    if (tasks.length === 0) { tableFoot.innerHTML = ''; return; }
 
-    // Daily stats row
-    let html = '<tr>';
-    html += '<td>Günlük Skor</td>';
+    let html = '<tr><td>Günlük Skor</td>';
     dates.forEach(d => {
       const dk = formatDateKey(d);
       const stats = getDayStats(dk, d);
       const pClass = stats.percent >= 75 ? 'high' : stats.percent >= 40 ? 'mid' : 'low';
-      html += `<td>
-        <span class="stat-fraction">${stats.done}/${stats.total}</span>
-        <span class="stat-percent ${pClass}">${stats.percent}%</span>
-      </td>`;
+      html += `<td><span class="stat-fraction">${stats.done}/${stats.total}</span><span class="stat-percent ${pClass}">${stats.percent}%</span></td>`;
     });
     html += '</tr>';
 
-    // Weekly score row
     const weekPct = getWeekStats(dates);
     const pClass = weekPct >= 75 ? 'high' : weekPct >= 40 ? 'mid' : 'low';
-    html += '<tr class="weekly-row">';
-    html += '<td>Haftalık Skor</td>';
-    html += `<td colspan="${dates.length}">
-      <span class="stat-percent ${pClass}" style="font-size:1.1rem;">${weekPct}%</span>
-    </td>`;
-    html += '</tr>';
-
+    html += `<tr class="weekly-row"><td>Haftalık Skor</td><td colspan="${dates.length}"><span class="stat-percent ${pClass}" style="font-size:1.1rem;">${weekPct}%</span></td></tr>`;
     tableFoot.innerHTML = html;
   }
 
@@ -602,116 +673,76 @@
     const listEl = $('#history-list');
     const countEl = $('#history-count');
     const history = state.weekHistory || [];
-
-    if (history.length === 0) {
-      section.classList.add('hidden');
-      return;
-    }
-
+    if (history.length === 0) { section.classList.add('hidden'); return; }
     section.classList.remove('hidden');
     countEl.textContent = history.length + ' hafta';
-
-    // Sort newest first
     const sorted = [...history].sort((a, b) => b.startDate.localeCompare(a.startDate));
-
     let html = '';
     sorted.forEach(week => {
       const pClass = week.percent >= 75 ? 'high' : week.percent >= 40 ? 'mid' : 'low';
       const emoji = week.percent >= 90 ? '🏆' : week.percent >= 75 ? '🔥' : week.percent >= 50 ? '💪' : week.percent >= 25 ? '📈' : '🌱';
-      html += `
-        <div class="history-card fade-in-up">
-          <button class="history-card-delete" data-history-id="${week.id}" title="Sil">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          </button>
-          <div class="history-card-top">
-            <span class="history-card-dates">${formatDateRange(week.startDate, week.endDate)}</span>
-            <span class="history-card-emoji">${emoji}</span>
-          </div>
-          <div class="history-card-score">
-            <span class="history-card-percent ${pClass}">${week.percent}%</span>
-            <span class="history-card-detail">${week.done}/${week.total} tamamlandı</span>
-          </div>
-          <div class="history-card-bar">
-            <div class="history-card-bar-fill ${pClass}" style="width:${week.percent}%"></div>
-          </div>
-        </div>`;
+      html += `<div class="history-card fade-in-up">
+        <button class="history-card-delete" data-history-id="${week.id}" title="Sil"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <div class="history-card-top"><span class="history-card-dates">${formatDateRange(week.startDate, week.endDate)}</span><span class="history-card-emoji">${emoji}</span></div>
+        <div class="history-card-score"><span class="history-card-percent ${pClass}">${week.percent}%</span><span class="history-card-detail">${week.done}/${week.total} tamamlandı</span></div>
+        <div class="history-card-bar"><div class="history-card-bar-fill ${pClass}" style="width:${week.percent}%"></div></div>
+      </div>`;
     });
-
     listEl.innerHTML = html;
-
-    // Delete buttons
     listEl.querySelectorAll('.history-card-delete').forEach(btn => {
-      btn.addEventListener('click', () => {
-        deleteHistoryEntry(btn.dataset.historyId);
-      });
+      btn.addEventListener('click', () => deleteHistoryEntry(btn.dataset.historyId));
     });
-  }
-
-  // ── Helpers ────────────────────────────────────────
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
   }
 
   // ── Event Bindings ─────────────────────────────────
   function bindEvents() {
-    // Theme toggle
     $('#btn-theme-toggle').addEventListener('click', toggleTheme);
-    // History toggle
+
     $('#history-toggle').addEventListener('click', () => {
-      const btn = $('#history-toggle');
-      const panel = $('#history-panel');
-      btn.classList.toggle('open');
-      panel.classList.toggle('open');
+      $('#history-toggle').classList.toggle('open');
+      $('#history-panel').classList.toggle('open');
     });
 
-    // Add category button
+    // Add category (new)
     $('#btn-add-category').addEventListener('click', () => {
+      editingCategoryId = null;
       categoryNameInput.value = '';
       selectedColor = CATEGORY_COLORS[0];
-      $$('.color-swatch').forEach((s, i) => {
-        s.classList.toggle('selected', i === 0);
-      });
+      $$('.color-swatch').forEach((s, i) => s.classList.toggle('selected', i === 0));
+      $('#cat-modal-title').textContent = 'Yeni Kategori';
+      $('#btn-confirm-category').textContent = 'Oluştur';
       openModal(categoryOverlay);
     });
 
-    // Category modal
+    // Category modal confirm (add or edit)
     $('#modal-close').addEventListener('click', () => closeModal(categoryOverlay));
     $('#btn-cancel-category').addEventListener('click', () => closeModal(categoryOverlay));
     $('#btn-confirm-category').addEventListener('click', () => {
       const name = categoryNameInput.value.trim();
-      if (!name) {
-        categoryNameInput.focus();
-        return;
+      if (!name) { categoryNameInput.focus(); return; }
+      if (editingCategoryId) {
+        updateCategory(editingCategoryId, name, selectedColor);
+      } else {
+        addCategory(name, selectedColor);
       }
-      addCategory(name, selectedColor);
       closeModal(categoryOverlay);
     });
-    categoryNameInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        $('#btn-confirm-category').click();
-      }
-    });
-    categoryOverlay.addEventListener('click', (e) => {
-      if (e.target === categoryOverlay) closeModal(categoryOverlay);
-    });
+    categoryNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-confirm-category').click(); });
+    categoryOverlay.addEventListener('click', (e) => { if (e.target === categoryOverlay) closeModal(categoryOverlay); });
 
     // Task modal
     $('#modal-task-close').addEventListener('click', () => closeModal(taskOverlay));
     $('#btn-cancel-task').addEventListener('click', () => closeModal(taskOverlay));
-    // Day picker toggle
+
     $$('#day-picker .day-chip').forEach(chip => {
       chip.addEventListener('click', () => {
         if (chip.dataset.day === 'all') {
-          // Toggle all: if all are selected → deselect all, otherwise → select all
           const dayChips = $$('#day-picker .day-chip:not(.day-chip-all)');
           const allSelected = [...dayChips].every(c => c.classList.contains('selected'));
           dayChips.forEach(c => c.classList.toggle('selected', !allSelected));
           chip.classList.toggle('selected', !allSelected);
         } else {
           chip.classList.toggle('selected');
-          // Sync "Tümü" button state
           const dayChips = $$('#day-picker .day-chip:not(.day-chip-all)');
           const allSelected = [...dayChips].every(c => c.classList.contains('selected'));
           $('#day-picker .day-chip-all').classList.toggle('selected', allSelected);
@@ -719,53 +750,38 @@
       });
     });
 
+    // Task modal confirm (add or edit)
     $('#btn-confirm-task').addEventListener('click', () => {
       const name = taskNameInput.value.trim();
-      if (!name) {
-        taskNameInput.focus();
-        return;
-      }
-      // Collect selected days
+      if (!name) { taskNameInput.focus(); return; }
       const selectedDays = [];
-      $$('#day-picker .day-chip.selected').forEach(chip => {
+      $$('#day-picker .day-chip.selected:not(.day-chip-all)').forEach(chip => {
         selectedDays.push(parseInt(chip.dataset.day));
       });
-      if (addingTaskToCategoryId) {
+      if (editingTaskId && editingTaskCatId) {
+        updateTask(editingTaskCatId, editingTaskId, name, selectedDays);
+      } else if (addingTaskToCategoryId) {
         addTask(addingTaskToCategoryId, name, selectedDays);
       }
       closeModal(taskOverlay);
     });
-    taskNameInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        $('#btn-confirm-task').click();
-      }
-    });
-    taskOverlay.addEventListener('click', (e) => {
-      if (e.target === taskOverlay) closeModal(taskOverlay);
-    });
+    taskNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-confirm-task').click(); });
+    taskOverlay.addEventListener('click', (e) => { if (e.target === taskOverlay) closeModal(taskOverlay); });
 
-    // Reset week (archive first, then clear)
+    // Reset week
     $('#btn-reset-week').addEventListener('click', () => {
       if (confirm('Bu haftayı arşivleyip sıfırlamak istiyor musunuz?')) {
-        // Archive current week before resetting
         archiveCurrentWeek();
         state.completions = {};
-        // Reset week start to this Monday
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const today = new Date(); today.setHours(0,0,0,0);
         state.currentWeekStart = formatDateKey(getMonday(today));
-        saveState();
-        render();
+        saveState(); render();
         showToast('Hafta arşivlendi ve sıfırlandı');
       }
     });
 
-    // Escape key closes modals
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        closeModal(categoryOverlay);
-        closeModal(taskOverlay);
-      }
+      if (e.key === 'Escape') { closeModal(categoryOverlay); closeModal(taskOverlay); }
     });
   }
 
@@ -773,14 +789,12 @@
   function scheduleMidnightRefresh() {
     const now = new Date();
     const midnight = new Date(now);
-    midnight.setHours(24, 0, 5, 0); // 00:00:05 next day (5s buffer)
-    const msUntilMidnight = midnight - now;
+    midnight.setHours(24, 0, 5, 0);
     setTimeout(() => {
-      checkAutoArchive();
-      render();
+      checkAutoArchive(); render();
       showToast('Yeni gün başladı — tarihler güncellendi ✨');
-      scheduleMidnightRefresh(); // Schedule next one
-    }, msUntilMidnight);
+      scheduleMidnightRefresh();
+    }, midnight - now);
   }
 
   // ── Initialize ─────────────────────────────────────
@@ -788,7 +802,6 @@
     initTheme();
     initColorPicker();
     loadState();
-    // Ensure weekHistory array exists (migration from older data)
     if (!state.weekHistory) state.weekHistory = [];
     checkAutoArchive();
     bindEvents();
@@ -796,11 +809,7 @@
     scheduleMidnightRefresh();
   }
 
-  // Boot
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 
 })();
