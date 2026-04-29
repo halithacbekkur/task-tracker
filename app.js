@@ -53,12 +53,13 @@
 
   // ── Date Helpers ───────────────────────────────────
   function getWeekDates() {
-    const dates = [];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const monday = getMonday(today);
+    const dates = [];
     for (let i = 0; i < NUM_DAYS; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() + i);
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
       dates.push(d);
     }
     return dates;
@@ -347,7 +348,40 @@
     const endD = new Date(startDate); endD.setDate(endD.getDate() + 6);
     const endDate = formatDateKey(endD);
     if (state.weekHistory.some(w => w.startDate === startDate)) return;
-    state.weekHistory.push({ id: uid(), startDate, endDate, percent: stats.percent, done: stats.done, total: stats.total, archivedAt: new Date().toISOString() });
+
+    // Build detailed per-category, per-task, per-day data
+    const detailCategories = [];
+    const weekDates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(startDate);
+      d.setDate(d.getDate() + i);
+      weekDates.push({ date: formatDateKey(d), dayName: DAY_NAMES_SHORT[d.getDay()] });
+    }
+
+    state.categories.forEach(cat => {
+      const tasks = [];
+      cat.tasks.forEach(task => {
+        const days = {};
+        weekDates.forEach(wd => {
+          const d = new Date(wd.date);
+          const scheduled = isTaskScheduledForDate(task, d);
+          const completed = !!state.completions[task.id + ':' + wd.date];
+          days[wd.date] = { scheduled, completed };
+        });
+        tasks.push({ name: task.name, days });
+      });
+      if (tasks.length > 0) {
+        detailCategories.push({ name: cat.name, color: cat.color, tasks });
+      }
+    });
+
+    state.weekHistory.push({
+      id: uid(), startDate, endDate,
+      percent: stats.percent, done: stats.done, total: stats.total,
+      archivedAt: new Date().toISOString(),
+      weekDates,
+      detail: detailCategories,
+    });
   }
 
   function checkAutoArchive() {
@@ -701,12 +735,72 @@
         <div class="history-card-top"><span class="history-card-dates">${formatDateRange(week.startDate, week.endDate)}</span><span class="history-card-emoji">${emoji}</span></div>
         <div class="history-card-score"><span class="history-card-percent ${pClass}">${week.percent}%</span><span class="history-card-detail">${week.done}/${week.total} tamamlandı</span></div>
         <div class="history-card-bar"><div class="history-card-bar-fill ${pClass}" style="width:${week.percent}%"></div></div>
+        <button class="history-card-view-btn" data-history-id="${week.id}">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          Detay Gör
+        </button>
       </div>`;
     });
     listEl.innerHTML = html;
     listEl.querySelectorAll('.history-card-delete').forEach(btn => {
       btn.addEventListener('click', () => deleteHistoryEntry(btn.dataset.historyId));
     });
+    listEl.querySelectorAll('.history-card-view-btn').forEach(btn => {
+      btn.addEventListener('click', () => showHistoryDetail(btn.dataset.historyId));
+    });
+  }
+
+  function showHistoryDetail(weekId) {
+    const week = (state.weekHistory || []).find(w => w.id === weekId);
+    if (!week) return;
+
+    const historyOverlay = $('#modal-history-overlay');
+    const pClass = week.percent >= 75 ? 'high' : week.percent >= 40 ? 'mid' : 'low';
+
+    // Title
+    $('#history-detail-title').textContent = formatDateRange(week.startDate, week.endDate);
+
+    // Summary
+    $('#history-detail-summary').innerHTML = `
+      <span class="history-detail-big-percent ${pClass}">${week.percent}%</span>
+      <div class="history-detail-meta">
+        <strong>${week.done}/${week.total}</strong> görev tamamlandı
+      </div>`;
+
+    // Detail table
+    const tableEl = $('#history-detail-table');
+    if (!week.detail || !week.weekDates) {
+      tableEl.innerHTML = '<tr><td style="padding:1rem; color:var(--text-tertiary)">Bu haftanın detay verisi bulunmuyor (eski arşiv).</td></tr>';
+    } else {
+      let html = '<thead><tr><th>Görev</th>';
+      week.weekDates.forEach(wd => {
+        html += `<th>${wd.dayName}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+
+      week.detail.forEach(cat => {
+        html += `<tr class="cat-label-row"><td colspan="${week.weekDates.length + 1}" style="border-left:4px solid ${cat.color}">
+          <span style="color:${cat.color}">●</span> ${escapeHtml(cat.name)}</td></tr>`;
+        cat.tasks.forEach(task => {
+          html += `<tr><td>${escapeHtml(task.name)}</td>`;
+          week.weekDates.forEach(wd => {
+            const info = task.days[wd.date];
+            if (!info || !info.scheduled) {
+              html += `<td><span class="detail-check na">—</span></td>`;
+            } else if (info.completed) {
+              html += `<td><span class="detail-check done">✓</span></td>`;
+            } else {
+              html += `<td><span class="detail-check missed">✗</span></td>`;
+            }
+          });
+          html += '</tr>';
+        });
+      });
+      html += '</tbody>';
+      tableEl.innerHTML = html;
+    }
+
+    openModal(historyOverlay);
   }
 
   // ── Event Bindings ─────────────────────────────────
@@ -797,9 +891,14 @@
         showToast('Hafta arşivlendi ve sıfırlandı');
       }
     });
+    // History detail modal
+    const historyOverlay = $('#modal-history-overlay');
+    $('#modal-history-close').addEventListener('click', () => closeModal(historyOverlay));
+    $('#btn-close-history-detail').addEventListener('click', () => closeModal(historyOverlay));
+    historyOverlay.addEventListener('click', (e) => { if (e.target === historyOverlay) closeModal(historyOverlay); });
 
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') { closeModal(categoryOverlay); closeModal(taskOverlay); }
+      if (e.key === 'Escape') { closeModal(categoryOverlay); closeModal(taskOverlay); closeModal(historyOverlay); }
     });
   }
 
