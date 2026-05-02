@@ -1182,13 +1182,6 @@
   }
 
   // ── Visitor Counter (Firebase Global) ───────────────
-  function getDeviceType() {
-    const ua = navigator.userAgent.toLowerCase();
-    if (/ipad|tablet|playbook|silk|(android(?!.*mobi))/i.test(ua)) return 'tablet';
-    if (/mobile|iphone|ipod|android.*mobi|blackberry|opera mini|iemobile/i.test(ua)) return 'phone';
-    return 'desktop';
-  }
-
   function getDeviceId() {
     let id = localStorage.getItem('taskgrid_device_id');
     if (!id) {
@@ -1200,41 +1193,16 @@
 
   function trackVisitor() {
     const el = $('#visitor-count');
-    const badge = $('#visitor-badge');
     const DB = 'https://count-b58fa-default-rtdb.firebaseio.com';
-    const device = getDeviceType();
     const deviceId = getDeviceId();
 
-    // POST = her giriş ayrı kayıt (race condition yok)
-    fetch(`${DB}/visits.json`, {
-      method: 'POST',
-      body: JSON.stringify({ d: deviceId, t: device, ts: Date.now() }),
-    })
-      .then(() => fetch(`${DB}/visits.json`))
+    // Cihazı kaydet, sonra toplam benzersiz cihaz say
+    fetch(`${DB}/devices/${deviceId}.json`, { method: 'PUT', body: JSON.stringify(true) })
+      .then(() => fetch(`${DB}/devices.json`))
       .then(r => r.json())
-      .then(allVisits => {
-        if (!allVisits) { el.textContent = '1'; return; }
-
-        const entries = Object.values(allVisits);
-        const totalVisits = entries.length;
-
-        // Benzersiz cihazlar
-        const uniqueDevices = {};
-        entries.forEach(v => { uniqueDevices[v.d] = v.t; });
-        let phones = 0, tablets = 0, desktops = 0;
-        Object.values(uniqueDevices).forEach(type => {
-          if (type === 'phone') phones++;
-          else if (type === 'tablet') tablets++;
-          else desktops++;
-        });
-        const uniqueTotal = phones + tablets + desktops;
-
-        el.textContent = totalVisits.toLocaleString('tr-TR');
-        badge.title = `${totalVisits} toplam giriş | ${uniqueTotal} farklı cihaz`;
-        badge.style.cursor = 'pointer';
-        badge.onclick = () => {
-          showToast(`👥 ${totalVisits} toplam giriş — ${uniqueTotal} farklı cihaz\n📱 ${phones} telefon  |  📟 ${tablets} tablet  |  💻 ${desktops} masaüstü`);
-        };
+      .then(devices => {
+        const count = devices ? Object.keys(devices).length : 1;
+        el.textContent = count.toLocaleString('tr-TR');
       })
       .catch(() => { el.textContent = '—'; });
   }
