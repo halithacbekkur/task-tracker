@@ -37,6 +37,7 @@
     completions: {},
     weekHistory: [],
     currentWeekStart: null,
+    notes: [],
   };
 
   let selectedColor = CATEGORY_COLORS[0];
@@ -50,6 +51,11 @@
   // Drag state
   let dragSrcTaskId = null;
   let dragSrcCatId = null;
+
+  // Notes state
+  let editingNoteId = null;
+  let noteSelectedColor = 'default';
+  let currentNoteFilter = 'all';
 
   // ── Date Helpers ───────────────────────────────────
   function getWeekDates() {
@@ -433,6 +439,7 @@
     renderFoot(dates);
     renderWeekSummary(dates);
     renderHistory();
+    renderNotes();
   }
 
   function renderHead(dates) {
@@ -914,14 +921,297 @@
     }, midnight - now);
   }
 
+  // ════════════════════════════════════════════════
+  //                  NOTES SYSTEM
+  // ════════════════════════════════════════════════
+
+  // ── Notes CRUD ─────────────────────────────────
+  function addNote(title, content, color, pinned) {
+    const note = {
+      id: uid(),
+      title: title.trim(),
+      content,
+      color: color || 'default',
+      pinned: !!pinned,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    state.notes.unshift(note);
+    saveState();
+    renderNotes();
+    showToast('Not eklendi');
+  }
+
+  function updateNote(noteId, title, content, color, pinned) {
+    const note = state.notes.find(n => n.id === noteId);
+    if (!note) return;
+    note.title = title.trim();
+    note.content = content;
+    note.color = color || 'default';
+    note.pinned = !!pinned;
+    note.updatedAt = new Date().toISOString();
+    saveState();
+    renderNotes();
+    showToast('Not güncellendi');
+  }
+
+  function deleteNote(noteId) {
+    const note = state.notes.find(n => n.id === noteId);
+    if (!note) return;
+    state.notes = state.notes.filter(n => n.id !== noteId);
+    saveState();
+    renderNotes();
+    showToast('Not silindi');
+  }
+
+  function toggleNotePin(noteId) {
+    const note = state.notes.find(n => n.id === noteId);
+    if (!note) return;
+    note.pinned = !note.pinned;
+    note.updatedAt = new Date().toISOString();
+    saveState();
+    renderNotes();
+  }
+
+  // ── Notes Render ────────────────────────────────
+  function renderNotes() {
+    const gridEl = $('#notes-grid');
+    const countEl = $('#notes-count');
+    const searchQuery = ($('#notes-search')?.value || '').toLowerCase().trim();
+    let notes = [...(state.notes || [])];
+
+    // Filter
+    if (currentNoteFilter === 'pinned') {
+      notes = notes.filter(n => n.pinned);
+    } else if (currentNoteFilter === 'recent') {
+      notes.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    }
+
+    // Search
+    if (searchQuery) {
+      notes = notes.filter(n =>
+        (n.title || '').toLowerCase().includes(searchQuery) ||
+        stripHtml(n.content || '').toLowerCase().includes(searchQuery)
+      );
+    }
+
+    // Sort: pinned first, then by creation date
+    if (currentNoteFilter !== 'recent') {
+      notes.sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return b.createdAt.localeCompare(a.createdAt);
+      });
+    }
+
+    countEl.textContent = state.notes.length > 0 ? state.notes.length + ' not' : '';
+
+    if (notes.length === 0) {
+      gridEl.innerHTML = `<div class="notes-empty">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <h3>${searchQuery ? 'Sonuç bulunamadı' : 'Henüz not yok'}</h3>
+        <p>${searchQuery ? 'Farklı bir arama deneyin' : 'Önemli notlarınızı buraya ekleyin'}</p>
+      </div>`;
+      return;
+    }
+
+    let html = '';
+    notes.forEach(note => {
+      const accentStyle = note.color && note.color !== 'default' ? `--note-accent:${note.color}` : '';
+      const pinnedClass = note.pinned ? ' pinned' : '';
+      const dateStr = formatNoteDate(note.updatedAt);
+      const preview = note.content || '';
+
+      html += `<div class="note-card fade-in-up${pinnedClass}" data-note-id="${note.id}" style="${accentStyle}">
+        ${note.pinned ? '<span class="note-card-pin">📌</span>' : ''}
+        ${note.title ? `<div class="note-card-title">${escapeHtml(note.title)}</div>` : ''}
+        <div class="note-card-body">${preview}</div>
+        <div class="note-card-footer">
+          <span class="note-card-date">${dateStr}</span>
+          <div class="note-card-actions">
+            <button class="note-action-btn pin-btn" data-note-id="${note.id}" title="${note.pinned ? 'Sabitlemeyi kaldır' : 'Sabitle'}">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="${note.pinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+            </button>
+            <button class="note-action-btn delete" data-note-id="${note.id}" title="Sil">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>`;
+    });
+
+    gridEl.innerHTML = html;
+
+    // Card click → edit
+    gridEl.querySelectorAll('.note-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.note-action-btn')) return;
+        openNoteEditor(card.dataset.noteId);
+      });
+    });
+
+    // Pin toggle
+    gridEl.querySelectorAll('.pin-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleNotePin(btn.dataset.noteId);
+      });
+    });
+
+    // Delete
+    gridEl.querySelectorAll('.note-action-btn.delete').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (confirm('Bu notu silmek istiyor musunuz?')) {
+          deleteNote(btn.dataset.noteId);
+        }
+      });
+    });
+  }
+
+  function formatNoteDate(isoStr) {
+    const d = new Date(isoStr);
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 60000) return 'Az önce';
+    if (diff < 3600000) return Math.floor(diff / 60000) + ' dk önce';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + ' saat önce';
+    return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined });
+  }
+
+  function stripHtml(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || '';
+  }
+
+  // ── Note Editor ─────────────────────────────────
+  function openNoteEditor(noteId) {
+    const noteOverlay = $('#modal-note-overlay');
+    const titleInput = $('#note-title-input');
+    const contentEl = $('#note-content-editable');
+    const pinCheck = $('#note-pin-check');
+
+    if (noteId) {
+      const note = state.notes.find(n => n.id === noteId);
+      if (!note) return;
+      editingNoteId = noteId;
+      titleInput.value = note.title || '';
+      contentEl.innerHTML = note.content || '';
+      pinCheck.checked = note.pinned;
+      noteSelectedColor = note.color || 'default';
+      $('#note-modal-title').textContent = 'Notu Düzenle';
+      $('#btn-confirm-note').textContent = 'Kaydet';
+    } else {
+      editingNoteId = null;
+      titleInput.value = '';
+      contentEl.innerHTML = '';
+      pinCheck.checked = false;
+      noteSelectedColor = 'default';
+      $('#note-modal-title').textContent = 'Yeni Not';
+      $('#btn-confirm-note').textContent = 'Kaydet';
+    }
+
+    // Sync color picker
+    $$('#note-color-picker .note-color-swatch').forEach(s => {
+      s.classList.toggle('selected', s.dataset.noteColor === noteSelectedColor);
+    });
+
+    updateNoteCharCount();
+    openModal(noteOverlay);
+  }
+
+  function saveCurrentNote() {
+    const title = $('#note-title-input').value.trim();
+    const content = $('#note-content-editable').innerHTML.trim();
+    const pinned = $('#note-pin-check').checked;
+
+    if (!title && (!content || content === '<br>')) {
+      showToast('Başlık veya içerik gerekli');
+      return false;
+    }
+
+    if (editingNoteId) {
+      updateNote(editingNoteId, title, content, noteSelectedColor, pinned);
+    } else {
+      addNote(title, content, noteSelectedColor, pinned);
+    }
+    return true;
+  }
+
+  function updateNoteCharCount() {
+    const text = stripHtml($('#note-content-editable').innerHTML || '');
+    $('#note-char-count').textContent = text.length + ' karakter';
+  }
+
+  // ── Notes Event Binding ─────────────────────────
+  function bindNoteEvents() {
+    const noteOverlay = $('#modal-note-overlay');
+
+    // New note button
+    $('#btn-add-note').addEventListener('click', () => openNoteEditor(null));
+
+    // Modal close
+    $('#modal-note-close').addEventListener('click', () => closeModal(noteOverlay));
+    $('#btn-cancel-note').addEventListener('click', () => closeModal(noteOverlay));
+    noteOverlay.addEventListener('click', (e) => { if (e.target === noteOverlay) closeModal(noteOverlay); });
+
+    // Save note
+    $('#btn-confirm-note').addEventListener('click', () => {
+      if (saveCurrentNote()) closeModal(noteOverlay);
+    });
+
+    // Toolbar
+    $$('#note-toolbar .toolbar-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cmd = btn.dataset.cmd;
+        const val = btn.dataset.val || null;
+        document.execCommand(cmd, false, val);
+        $('#note-content-editable').focus();
+      });
+    });
+
+    // Character count
+    $('#note-content-editable').addEventListener('input', updateNoteCharCount);
+
+    // Color picker
+    $$('#note-color-picker .note-color-swatch').forEach(swatch => {
+      swatch.addEventListener('click', () => {
+        $$('#note-color-picker .note-color-swatch').forEach(s => s.classList.remove('selected'));
+        swatch.classList.add('selected');
+        noteSelectedColor = swatch.dataset.noteColor;
+      });
+    });
+
+    // Search
+    $('#notes-search').addEventListener('input', () => renderNotes());
+
+    // Filter chips
+    $$('#notes-filters .note-filter-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        $$('#notes-filters .note-filter-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        currentNoteFilter = chip.dataset.filter;
+        renderNotes();
+      });
+    });
+
+    // Escape closes note modal too
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeModal(noteOverlay);
+    });
+  }
+
   // ── Initialize ─────────────────────────────────────
   function init() {
     initTheme();
     initColorPicker();
     loadState();
     if (!state.weekHistory) state.weekHistory = [];
+    if (!state.notes) state.notes = [];
     checkAutoArchive();
     bindEvents();
+    bindNoteEvents();
     render();
     scheduleMidnightRefresh();
   }
