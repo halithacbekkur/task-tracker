@@ -1205,36 +1205,36 @@
     const device = getDeviceType();
     const deviceId = getDeviceId();
 
-    // 1) Increment total visits
-    fetch(`${DB}/visitors/total.json`).then(r => r.json())
-      .then(total => {
-        const newTotal = (total || 0) + 1;
-        return fetch(`${DB}/visitors/total.json`, { method: 'PUT', body: JSON.stringify(newTotal) })
-          .then(() => newTotal);
-      })
-      .then(totalVisits => {
-        // 2) Register this unique device
-        fetch(`${DB}/visitors/devices/${deviceId}.json`, { method: 'PUT', body: JSON.stringify(device) })
-          .then(() => fetch(`${DB}/visitors/devices.json`))
-          .then(r => r.json())
-          .then(devices => {
-            let phones = 0, tablets = 0, desktops = 0;
-            if (devices) {
-              Object.values(devices).forEach(type => {
-                if (type === 'phone') phones++;
-                else if (type === 'tablet') tablets++;
-                else if (type === 'desktop') desktops++;
-              });
-            }
-            const uniqueTotal = phones + tablets + desktops;
+    // POST = her giriş ayrı kayıt (race condition yok)
+    fetch(`${DB}/visits.json`, {
+      method: 'POST',
+      body: JSON.stringify({ d: deviceId, t: device, ts: Date.now() }),
+    })
+      .then(() => fetch(`${DB}/visits.json`))
+      .then(r => r.json())
+      .then(allVisits => {
+        if (!allVisits) { el.textContent = '1'; return; }
 
-            el.textContent = totalVisits.toLocaleString('tr-TR');
-            badge.title = `Toplam ${totalVisits} giriş | ${uniqueTotal} farklı cihaz`;
-            badge.style.cursor = 'pointer';
-            badge.onclick = () => {
-              showToast(`👥 Toplam: ${totalVisits} giriş\n📱 ${phones} farklı telefon  |  📟 ${tablets} farklı tablet  |  💻 ${desktops} farklı masaüstü`);
-            };
-          });
+        const entries = Object.values(allVisits);
+        const totalVisits = entries.length;
+
+        // Benzersiz cihazlar
+        const uniqueDevices = {};
+        entries.forEach(v => { uniqueDevices[v.d] = v.t; });
+        let phones = 0, tablets = 0, desktops = 0;
+        Object.values(uniqueDevices).forEach(type => {
+          if (type === 'phone') phones++;
+          else if (type === 'tablet') tablets++;
+          else desktops++;
+        });
+        const uniqueTotal = phones + tablets + desktops;
+
+        el.textContent = totalVisits.toLocaleString('tr-TR');
+        badge.title = `${totalVisits} toplam giriş | ${uniqueTotal} farklı cihaz`;
+        badge.style.cursor = 'pointer';
+        badge.onclick = () => {
+          showToast(`👥 ${totalVisits} toplam giriş — ${uniqueTotal} farklı cihaz\n📱 ${phones} telefon  |  📟 ${tablets} tablet  |  💻 ${desktops} masaüstü`);
+        };
       })
       .catch(() => { el.textContent = '—'; });
   }
