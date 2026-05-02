@@ -1181,6 +1181,28 @@
     }, midnight - now);
   }
 
+  // ── Visitor Counter ─────────────────────────────────
+  function trackVisitor() {
+    const el = $('#visitor-count');
+    const COUNTER_KEY = 'taskgrid-halid-visitor';
+
+    // Use CounterAPI (free, no signup)
+    fetch(`https://api.counterapi.dev/v1/${COUNTER_KEY}/up`, {
+      method: 'GET',
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.count !== undefined) {
+          el.textContent = data.count.toLocaleString('tr-TR');
+          el.title = `Toplam ${data.count} ziyaret`;
+        }
+      })
+      .catch(() => {
+        // Fallback: hide badge if API is unreachable
+        el.textContent = '—';
+      });
+  }
+
   // ── Initialize ─────────────────────────────────────
   function init() {
     initTheme();
@@ -1192,6 +1214,7 @@
     bindEvents();
     render();
     scheduleMidnightRefresh();
+    trackVisitor();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

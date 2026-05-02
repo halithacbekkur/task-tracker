@@ -210,8 +210,38 @@ body {
 
 .header-actions {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
   flex-shrink: 0;
+}
+
+.visitor-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 99px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: default;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.visitor-badge:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+.visitor-badge svg {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.visitor-badge:hover svg {
+  opacity: 1;
 }
 
 /* --- Buttons --- */
