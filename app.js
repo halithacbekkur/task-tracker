@@ -1193,16 +1193,35 @@
 
   function trackVisitor() {
     const el = $('#visitor-count');
+    const badge = $('#visitor-badge');
     const DB = 'https://count-b58fa-default-rtdb.firebaseio.com';
     const deviceId = getDeviceId();
 
-    // Cihazı kaydet, sonra toplam benzersiz cihaz say
-    fetch(`${DB}/devices/${deviceId}.json`, { method: 'PUT', body: JSON.stringify(true) })
-      .then(() => fetch(`${DB}/devices.json`))
+    // 1) Toplam giriş sayısını artır
+    fetch(`${DB}/totalVisits.json`)
       .then(r => r.json())
-      .then(devices => {
-        const count = devices ? Object.keys(devices).length : 1;
-        el.textContent = count.toLocaleString('tr-TR');
+      .then(total => {
+        const newTotal = (total || 0) + 1;
+        return fetch(`${DB}/totalVisits.json`, { method: 'PUT', body: JSON.stringify(newTotal) })
+          .then(() => newTotal);
+      })
+      .then(totalVisits => {
+        // 2) Bu cihazı kaydet ve benzersiz cihazları say
+        fetch(`${DB}/devices/${deviceId}.json`, { method: 'PUT', body: JSON.stringify(true) })
+          .then(() => fetch(`${DB}/devices.json`))
+          .then(r => r.json())
+          .then(devices => {
+            const uniqueCount = devices ? Object.keys(devices).length : 1;
+            
+            // İkisini de göster: Toplam / Benzersiz
+            el.textContent = `${totalVisits.toLocaleString('tr-TR')} / ${uniqueCount.toLocaleString('tr-TR')}`;
+            badge.title = `Toplam Giriş: ${totalVisits} | Farklı Cihaz: ${uniqueCount}`;
+            
+            badge.style.cursor = 'pointer';
+            badge.onclick = () => {
+              showToast(`👥 ${totalVisits} toplam giriş yapıldı (${uniqueCount} farklı cihazdan)`);
+            };
+          });
       })
       .catch(() => { el.textContent = '—'; });
   }
