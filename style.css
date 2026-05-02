@@ -531,6 +531,82 @@ body {
   white-space: nowrap;
 }
 
+.note-card-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.note-card-due.future {
+  color: var(--accent-primary);
+  background: var(--accent-glow);
+}
+
+.note-card-due.today {
+  color: #fff;
+  background: var(--success);
+}
+
+.note-card-due.past {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.note-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.15rem;
+}
+
+.note-card-created {
+  font-size: 0.6rem;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* Note date row in editor */
+.note-date-row {
+  margin-top: 0.2rem;
+  margin-bottom: 0.2rem;
+}
+
+.note-date-row label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.note-date-row label svg {
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.note-date-row input[type="date"] {
+  padding: 0.45rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: all var(--duration-fast) var(--ease-out);
+  width: 100%;
+  max-width: 220px;
+}
+
+.note-date-row input[type="date"]:focus {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
 .notes-empty {
   grid-column: 1 / -1;
   text-align: center;

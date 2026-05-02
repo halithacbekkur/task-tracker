@@ -448,7 +448,7 @@
   }
 
   // ── Notes CRUD ────────────────────────────────────
-  function addNote(title, content, color, pinned, tags) {
+  function addNote(title, content, color, pinned, tags, dueDate) {
     const note = {
       id: uid(),
       title: title.trim(),
@@ -456,6 +456,7 @@
       color: color || '',
       pinned: !!pinned,
       tags: tags || [],
+      dueDate: dueDate || '',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -465,7 +466,7 @@
     showToast(`"${note.title}" notu eklendi`);
   }
 
-  function updateNote(noteId, title, content, color, pinned, tags) {
+  function updateNote(noteId, title, content, color, pinned, tags, dueDate) {
     const note = state.notes.find(n => n.id === noteId);
     if (!note) return;
     note.title = title.trim();
@@ -473,6 +474,7 @@
     note.color = color || '';
     note.pinned = !!pinned;
     note.tags = tags || [];
+    note.dueDate = dueDate || '';
     note.updatedAt = new Date().toISOString();
     saveState();
     renderNotes();
@@ -870,6 +872,24 @@
       const tagHtml = (note.tags || []).map(t => `<span class="note-tag">${escapeHtml(t)}</span>`).join('');
       const pinHtml = note.pinned ? `<svg class="note-card-pin" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V5a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v5.76z"/></svg>` : '';
 
+      // Due date badge
+      let dueDateHtml = '';
+      if (note.dueDate) {
+        const dueD = new Date(note.dueDate + 'T00:00:00');
+        const today = new Date(); today.setHours(0,0,0,0);
+        const diffDays = Math.round((dueD - today) / 86400000);
+        let dueClass = 'future';
+        let dueLabel = '';
+        if (diffDays < 0) { dueClass = 'past'; dueLabel = Math.abs(diffDays) + ' gün geçti'; }
+        else if (diffDays === 0) { dueClass = 'today'; dueLabel = 'Bugün!'; }
+        else if (diffDays === 1) { dueClass = 'future'; dueLabel = 'Yarın'; }
+        else { dueLabel = dueD.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short' }); }
+        dueDateHtml = `<span class="note-card-due ${dueClass}">📅 ${dueLabel}</span>`;
+      }
+
+      // Created date
+      const createdStr = new Date(note.createdAt).toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
       html += `<div class="note-card fade-in-up" data-note-id="${note.id}">
         <div class="note-card-accent" style="background:${accentBg}; opacity:${accentOpacity}"></div>
         <div class="note-card-body">
@@ -877,10 +897,14 @@
             <span class="note-card-title">${escapeHtml(note.title || 'Başlıksız')}</span>
             ${pinHtml}
           </div>
+          ${dueDateHtml}
           ${note.content ? `<div class="note-card-content">${escapeHtml(note.content)}</div>` : ''}
           <div class="note-card-footer">
             <div class="note-card-tags">${tagHtml}</div>
             <span class="note-card-date">${formatRelativeDate(note.updatedAt)}</span>
+          </div>
+          <div class="note-card-meta">
+            <span class="note-card-created">Oluşturulma: ${createdStr}</span>
           </div>
         </div>
       </div>`;
@@ -899,6 +923,7 @@
     const titleInput = $('#input-note-title');
     const contentInput = $('#input-note-content');
     const tagsInput = $('#input-note-tags');
+    const dateInput = $('#input-note-date');
     const pinBtn = $('#note-pin-toggle');
     const deleteBtn = $('#btn-delete-note');
 
@@ -910,6 +935,7 @@
       titleInput.value = note.title;
       contentInput.value = note.content;
       tagsInput.value = (note.tags || []).join(', ');
+      dateInput.value = note.dueDate || '';
       noteSelectedColor = note.color || '';
       notePinned = note.pinned;
       $('#note-modal-title').textContent = 'Notu Düzenle';
@@ -920,6 +946,7 @@
       titleInput.value = '';
       contentInput.value = '';
       tagsInput.value = '';
+      dateInput.value = '';
       noteSelectedColor = '';
       notePinned = false;
       $('#note-modal-title').textContent = 'Yeni Not';
@@ -1114,10 +1141,11 @@
       if (!title && !content) { $('#input-note-title').focus(); return; }
       const tagsRaw = $('#input-note-tags').value.trim();
       const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(t => t) : [];
+      const dueDate = $('#input-note-date').value;
       if (editingNoteId) {
-        updateNote(editingNoteId, title || 'Başlıksız', content, noteSelectedColor, notePinned, tags);
+        updateNote(editingNoteId, title || 'Başlıksız', content, noteSelectedColor, notePinned, tags, dueDate);
       } else {
-        addNote(title || 'Başlıksız', content, noteSelectedColor, notePinned, tags);
+        addNote(title || 'Başlıksız', content, noteSelectedColor, notePinned, tags, dueDate);
       }
       closeModal(noteOverlay);
     });
