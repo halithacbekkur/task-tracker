@@ -1182,22 +1182,46 @@
   }
 
   // ── Visitor Counter (Firebase Global) ───────────────
+  function getDeviceType() {
+    const ua = navigator.userAgent.toLowerCase();
+    if (/ipad|tablet|playbook|silk|(android(?!.*mobi))/i.test(ua)) return 'tablet';
+    if (/mobile|iphone|ipod|android.*mobi|blackberry|opera mini|iemobile/i.test(ua)) return 'phone';
+    return 'desktop';
+  }
+
   function trackVisitor() {
     const el = $('#visitor-count');
+    const badge = $('#visitor-badge');
     const DB = 'https://count-b58fa-default-rtdb.firebaseio.com';
+    const device = getDeviceType();
 
-    fetch(`${DB}/visitors/count.json`)
-      .then(r => r.json())
-      .then(current => {
-        const newCount = (current || 0) + 1;
-        return fetch(`${DB}/visitors/count.json`, {
+    // Increment total + device type
+    Promise.all([
+      fetch(`${DB}/visitors/total.json`).then(r => r.json()),
+      fetch(`${DB}/visitors/phone.json`).then(r => r.json()),
+      fetch(`${DB}/visitors/tablet.json`).then(r => r.json()),
+      fetch(`${DB}/visitors/desktop.json`).then(r => r.json()),
+    ])
+      .then(([total, phone, tablet, desktop]) => {
+        const newTotal = (total || 0) + 1;
+        const newPhone = (phone || 0) + (device === 'phone' ? 1 : 0);
+        const newTablet = (tablet || 0) + (device === 'tablet' ? 1 : 0);
+        const newDesktop = (desktop || 0) + (device === 'desktop' ? 1 : 0);
+
+        return fetch(`${DB}/visitors.json`, {
           method: 'PUT',
-          body: JSON.stringify(newCount),
-        }).then(() => newCount);
+          body: JSON.stringify({ total: newTotal, phone: newPhone, tablet: newTablet, desktop: newDesktop }),
+        }).then(() => ({ total: newTotal, phone: newPhone, tablet: newTablet, desktop: newDesktop }));
       })
-      .then(count => {
-        el.textContent = count.toLocaleString('tr-TR');
-        el.parentElement.title = `Toplam ${count} ziyaret`;
+      .then(stats => {
+        el.textContent = stats.total.toLocaleString('tr-TR');
+        badge.title = `Toplam: ${stats.total} | 📱 Telefon: ${stats.phone} | 📟 Tablet: ${stats.tablet} | 💻 Masaüstü: ${stats.desktop}`;
+
+        // Click to show popup
+        badge.style.cursor = 'pointer';
+        badge.onclick = () => {
+          showToast(`📱 Telefon: ${stats.phone}  |  📟 Tablet: ${stats.tablet}  |  💻 Masaüstü: ${stats.desktop}  |  Toplam: ${stats.total}`);
+        };
       })
       .catch(() => {
         el.textContent = '—';
