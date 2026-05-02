@@ -1184,23 +1184,12 @@
   // ── Visitor Counter ─────────────────────────────────
   function trackVisitor() {
     const el = $('#visitor-count');
-    const COUNTER_KEY = 'taskgrid-halid-visitor';
-
-    // Use CounterAPI (free, no signup)
-    fetch(`https://api.counterapi.dev/v1/${COUNTER_KEY}/up`, {
-      method: 'GET',
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.count !== undefined) {
-          el.textContent = data.count.toLocaleString('tr-TR');
-          el.title = `Toplam ${data.count} ziyaret`;
-        }
-      })
-      .catch(() => {
-        // Fallback: hide badge if API is unreachable
-        el.textContent = '—';
-      });
+    // Per-device visit count (localStorage)
+    let count = parseInt(localStorage.getItem('taskgrid_visit_count') || '0', 10);
+    count++;
+    localStorage.setItem('taskgrid_visit_count', count.toString());
+    el.textContent = count.toLocaleString('tr-TR');
+    el.parentElement.title = `Bu cihazdan ${count} kez ziyaret edildi`;
   }
 
   // ── Initialize ─────────────────────────────────────
