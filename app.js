@@ -1181,15 +1181,27 @@
     }, midnight - now);
   }
 
-  // ── Visitor Counter ─────────────────────────────────
+  // ── Visitor Counter (Firebase Global) ───────────────
   function trackVisitor() {
     const el = $('#visitor-count');
-    // Per-device visit count (localStorage)
-    let count = parseInt(localStorage.getItem('taskgrid_visit_count') || '0', 10);
-    count++;
-    localStorage.setItem('taskgrid_visit_count', count.toString());
-    el.textContent = count.toLocaleString('tr-TR');
-    el.parentElement.title = `Bu cihazdan ${count} kez ziyaret edildi`;
+    const DB = 'https://count-b58fa-default-rtdb.firebaseio.com';
+
+    fetch(`${DB}/visitors/count.json`)
+      .then(r => r.json())
+      .then(current => {
+        const newCount = (current || 0) + 1;
+        return fetch(`${DB}/visitors/count.json`, {
+          method: 'PUT',
+          body: JSON.stringify(newCount),
+        }).then(() => newCount);
+      })
+      .then(count => {
+        el.textContent = count.toLocaleString('tr-TR');
+        el.parentElement.title = `Toplam ${count} ziyaret`;
+      })
+      .catch(() => {
+        el.textContent = '—';
+      });
   }
 
   // ── Initialize ─────────────────────────────────────
