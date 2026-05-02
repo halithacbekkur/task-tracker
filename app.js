@@ -1189,43 +1189,54 @@
     return 'desktop';
   }
 
+  function getDeviceId() {
+    let id = localStorage.getItem('taskgrid_device_id');
+    if (!id) {
+      id = 'dev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      localStorage.setItem('taskgrid_device_id', id);
+    }
+    return id;
+  }
+
   function trackVisitor() {
     const el = $('#visitor-count');
     const badge = $('#visitor-badge');
     const DB = 'https://count-b58fa-default-rtdb.firebaseio.com';
     const device = getDeviceType();
+    const deviceId = getDeviceId();
 
-    // Increment total + device type
-    Promise.all([
-      fetch(`${DB}/visitors/total.json`).then(r => r.json()),
-      fetch(`${DB}/visitors/phone.json`).then(r => r.json()),
-      fetch(`${DB}/visitors/tablet.json`).then(r => r.json()),
-      fetch(`${DB}/visitors/desktop.json`).then(r => r.json()),
-    ])
-      .then(([total, phone, tablet, desktop]) => {
+    // 1) Increment total visits
+    fetch(`${DB}/visitors/total.json`).then(r => r.json())
+      .then(total => {
         const newTotal = (total || 0) + 1;
-        const newPhone = (phone || 0) + (device === 'phone' ? 1 : 0);
-        const newTablet = (tablet || 0) + (device === 'tablet' ? 1 : 0);
-        const newDesktop = (desktop || 0) + (device === 'desktop' ? 1 : 0);
-
-        return fetch(`${DB}/visitors.json`, {
-          method: 'PUT',
-          body: JSON.stringify({ total: newTotal, phone: newPhone, tablet: newTablet, desktop: newDesktop }),
-        }).then(() => ({ total: newTotal, phone: newPhone, tablet: newTablet, desktop: newDesktop }));
+        return fetch(`${DB}/visitors/total.json`, { method: 'PUT', body: JSON.stringify(newTotal) })
+          .then(() => newTotal);
       })
-      .then(stats => {
-        el.textContent = stats.total.toLocaleString('tr-TR');
-        badge.title = `Toplam: ${stats.total} | 📱 Telefon: ${stats.phone} | 📟 Tablet: ${stats.tablet} | 💻 Masaüstü: ${stats.desktop}`;
+      .then(totalVisits => {
+        // 2) Register this unique device
+        fetch(`${DB}/visitors/devices/${deviceId}.json`, { method: 'PUT', body: JSON.stringify(device) })
+          .then(() => fetch(`${DB}/visitors/devices.json`))
+          .then(r => r.json())
+          .then(devices => {
+            let phones = 0, tablets = 0, desktops = 0;
+            if (devices) {
+              Object.values(devices).forEach(type => {
+                if (type === 'phone') phones++;
+                else if (type === 'tablet') tablets++;
+                else if (type === 'desktop') desktops++;
+              });
+            }
+            const uniqueTotal = phones + tablets + desktops;
 
-        // Click to show popup
-        badge.style.cursor = 'pointer';
-        badge.onclick = () => {
-          showToast(`📱 Telefon: ${stats.phone}  |  📟 Tablet: ${stats.tablet}  |  💻 Masaüstü: ${stats.desktop}  |  Toplam: ${stats.total}`);
-        };
+            el.textContent = totalVisits.toLocaleString('tr-TR');
+            badge.title = `Toplam ${totalVisits} giriş | ${uniqueTotal} farklı cihaz`;
+            badge.style.cursor = 'pointer';
+            badge.onclick = () => {
+              showToast(`👥 Toplam: ${totalVisits} giriş\n📱 ${phones} farklı telefon  |  📟 ${tablets} farklı tablet  |  💻 ${desktops} farklı masaüstü`);
+            };
+          });
       })
-      .catch(() => {
-        el.textContent = '—';
-      });
+      .catch(() => { el.textContent = '—'; });
   }
 
   // ── Initialize ─────────────────────────────────────
